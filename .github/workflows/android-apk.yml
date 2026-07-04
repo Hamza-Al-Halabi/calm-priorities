@@ -1,0 +1,61 @@
+# ------------------------------------------------------------------
+# Build Android APK — runs on GitHub's servers (free for public and
+# private repos within the generous monthly quota).
+#
+# Trigger: every push to main, or manually from the Actions tab
+# ("Run workflow"). When it finishes, open the run → Artifacts →
+# download CalmPriorities-apk → inside is app-debug.apk.
+#
+# Optional: to bake in your email-reminder server, add a repository
+# variable (Settings → Secrets and variables → Actions → Variables)
+# named VITE_API_URL with your Render URL, then re-run the workflow.
+# ------------------------------------------------------------------
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Build web app
+        working-directory: frontend
+        run: |
+          # Only bake VITE_API_URL in if the repo variable is set —
+          # otherwise the app runs fully local (no email reminders).
+          if [ -n "${{ vars.VITE_API_URL }}" ]; then
+            export VITE_API_URL="${{ vars.VITE_API_URL }}"
+            echo "Building with reminder server: $VITE_API_URL"
+          fi
+          npm ci
+          npm run build
+
+      - name: Copy web app into the Android project
+        working-directory: frontend
+        run: npx cap sync android
+
+      - name: Build APK
+        working-directory: frontend/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CalmPriorities-apk
+          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk

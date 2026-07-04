@@ -1,0 +1,26 @@
+CALM PRIORITIES — WINDOWS
+=========================
+
+RUN IT
+1. Keep CalmPriorities.exe and config.json in the same folder.
+2. Double-click CalmPriorities.exe.
+   First time, Windows SmartScreen may warn (the exe isn't code-signed):
+   click "More info" -> "Run anyway".
+3. Your browser opens at http://localhost:5173 — that's the app.
+
+ALREADY SET UP FOR YOU (config.json)
+- Your Resend API key and email are pre-filled. On first launch the app
+  auto-fills h.halab9.6.3@gmail.com and turns email reminders on.
+- Edit config.json anytime (port, key, email). Restart the exe after.
+
+GOOD TO KNOW
+- Email reminders send while the exe window is open — minimize it,
+  don't close it. Checks run every 5 minutes.
+- Resend's test sender (onboarding@resend.dev) only delivers to the
+  email you signed up to Resend with. To email any address, verify a
+  domain at resend.com -> Domains, then set "fromEmail" in config.json.
+- Browser notifications: in the app, Reminders -> Turn on browser
+  reminders -> Allow.
+- Your tasks live in your browser (localStorage). data.json next to the
+  exe only mirrors upcoming deadlines for the email check.
+- Port 5173 busy? Change "port" in config.json (e.g. 5180) and restart.

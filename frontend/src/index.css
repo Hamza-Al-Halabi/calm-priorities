@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------
+   Design tokens (Tailwind v4 @theme).
+   A calm, dusty palette: warm beige base, lavender primary, soft blue,
+   sage green, warm sand and dusty blush. Every color the app uses is
+   defined here — change the mood of the whole app from this one block.
+   ------------------------------------------------------------------ */
+@theme {
+  --font-display: "Fraunces", ui-serif, Georgia, serif;
+  --font-body: "Nunito Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Warm beige neutrals (backgrounds, borders) */
+  --color-linen-50: #fbf9f5;
+  --color-linen-100: #f5f1e9;
+  --color-linen-200: #eae4d7;
+  --color-linen-300: #ddd5c3;
+
+  /* Gentle gray-blue text */
+  --color-ink-900: #3d4451;
+  --color-ink-600: #6b7484;
+  --color-ink-400: #9aa3b2;
+
+  /* Light lavender — primary actions */
+  --color-lav-50: #f4f2fc;
+  --color-lav-100: #ebe8f9;
+  --color-lav-200: #d9d4f2;
+  --color-lav-500: #8478ce;
+  --color-lav-600: #6f63c0;
+  --color-lav-700: #5a4fa3;
+
+  /* Soft blue — informational accents */
+  --color-brook-50: #f0f6fc;
+  --color-brook-100: #e4eef9;
+  --color-brook-200: #c9dcf1;
+  --color-brook-600: #5b8ac9;
+  --color-brook-700: #44699c;
+
+  /* Mint / sage green — low priority, completion */
+  --color-sage-50: #f1f7f2;
+  --color-sage-100: #e5f0e7;
+  --color-sage-200: #cfe4d4;
+  --color-sage-500: #7faf8d;
+  --color-sage-600: #6fa07e;
+  --color-sage-700: #4e7a5d;
+
+  /* Warm sand — medium priority, "due soon" */
+  --color-sand-50: #fbf4e8;
+  --color-sand-100: #f7ecda;
+  --color-sand-200: #efddbd;
+  --color-sand-500: #d9a25f;
+  --color-sand-700: #8f6a3c;
+
+  /* Dusty blush — high priority, "overdue" (noticeable, never alarming) */
+  --color-blush-50: #faf0ef;
+  --color-blush-100: #f6e4e2;
+  --color-blush-200: #efcfcb;
+  --color-blush-500: #cc8b85;
+  --color-blush-700: #9e5f5a;
+
+  /* Soft warm shadows */
+  --shadow-soft: 0 10px 30px -14px rgb(61 68 81 / 0.18);
+  --shadow-lift: 0 16px 40px -16px rgb(61 68 81 / 0.28);
+}
+
+/* Ambient page background: warm linen with two very soft washes of
+   lavender and blue drifting in from the corners. */
+body {
+  min-height: 100vh;
+  color: var(--color-ink-900);
+  font-family: var(--font-body);
+  background-color: var(--color-linen-50);
+  background-image:
+    radial-gradient(55rem 38rem at 88% -12%, var(--color-lav-50), transparent 60%),
+    radial-gradient(48rem 32rem at -12% 18%, var(--color-brook-50), transparent 55%),
+    radial-gradient(40rem 30rem at 50% 115%, var(--color-sage-50), transparent 55%);
+  background-attachment: fixed;
+}
+
+/* Gentle default transitions on interactive elements */
+button,
+input,
+select,
+textarea {
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+/* Calm focus style, visible for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--color-lav-500);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Respect users who prefer less motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
