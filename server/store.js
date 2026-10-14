@@ -52,3 +52,21 @@ export function putUser(user) {
 export function allUsers() {
   return Object.values(readAll());
 }
+
+/* ---------- full app state (tasks + settings) and small bookkeeping ---------- */
+
+const STATE_FILE = path.join(process.cwd(), "state.json");
+const META_FILE = path.join(process.cwd(), "meta.json");
+
+function readJson(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+export const getState = () => readJson(STATE_FILE, { tasks: [], settings: null, updatedAt: 0 });
+export const putState = (s) => fs.writeFileSync(STATE_FILE, JSON.stringify(s));
+export const getMeta = () => readJson(META_FILE, {});
+export const putMeta = (m) => fs.writeFileSync(META_FILE, JSON.stringify(m));

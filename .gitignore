@@ -9,3 +9,5 @@ meta.json
 *.tmp
 desktop/config.json
 frontend/dist/
+state.json
+meta.json

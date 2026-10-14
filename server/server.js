@@ -43,14 +43,23 @@
 import express from "express";
 import cors from "cors";
 import cron from "node-cron";
-import { getUser, putUser, allUsers } from "./store.js";
+import nodemailer from "nodemailer";
+import { getUser, putUser, allUsers, getState, putState, getMeta, putMeta } from "./store.js";
+import { buildDigest } from "./digest.js";
+import { dayKey } from "./stats.js";
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN || "*" }));
-app.use(express.json({ limit: "200kb" }));
+app.use(express.json({ limit: "2mb" }));
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const FROM_EMAIL = process.env.FROM_EMAIL || "onboarding@resend.dev";
+// Gmail option: SMTP_PASS is a Google "App password".
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const DEFAULT_EMAIL = process.env.DEFAULT_EMAIL || "";
+// Shared secret between the desktop app and this server (protects your tasks).
+const SYNC_TOKEN = process.env.SYNC_TOKEN || "";
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 /* ---------- health check (also a handy wake-up target) ---------- */
@@ -90,39 +99,60 @@ app.post("/api/sync", (req, res) => {
   res.json({ ok: true, stored: tasks.length });
 });
 
-/* ---------- 3. SEND: one calm email via Resend ---------- */
-async function sendEmail(to, task) {
-  const when = new Date(task.deadline).toLocaleString("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+/* ---------- 3. SEND: one email via Gmail (SMTP) or Resend ---------- */
+const smtp =
+  SMTP_USER && SMTP_PASS
+    ? nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
+        auth: { user: SMTP_USER, pass: SMTP_PASS },
+      })
+    : null;
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: `Calm Priorities <${FROM_EMAIL}>`,
-      to: [to],
-      subject: `Gentle reminder: “${task.title}”`,
-      text: `Hi,\n\nJust a calm nudge — “${task.title}” is due ${when}.\n\nOne thing at a time.\nCalm Priorities 🌿`,
-    }),
-  });
-
-  if (!response.ok) {
-    console.error("Resend error", response.status, await response.text());
+/** → { ok, error? } — never throws. */
+async function sendMail({ to, subject, text, html }) {
+  try {
+    if (smtp) {
+      await smtp.sendMail({ from: `Calm Priorities <${SMTP_USER}>`, to, subject, text, html });
+      return { ok: true };
+    }
+    if (!RESEND_API_KEY) return { ok: false, error: "No email provider configured." };
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: `Calm Priorities <${FROM_EMAIL}>`, to: [to], subject, text, html }),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.error("Resend error", response.status, body);
+      return { ok: false, error: `Resend refused it (${response.status}).` };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("Email error", err);
+    return { ok: false, error: String(err?.message || err).slice(0, 200) };
   }
-  return response.ok;
+}
+
+async function sendEmail(to, task) {
+  const when = new Date(task.deadline).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+  const r = await sendMail({
+    to,
+    subject: `Gentle reminder: “${task.title}”`,
+    text: `Hi,
+
+Just a calm nudge — “${task.title}” is due ${when}.
+
+One thing at a time.
+Calm Priorities 🌿`,
+  });
+  return r.ok;
 }
 
 /* ---------- 2. CHECK: find tasks entering their reminder window ---------- */
 async function checkReminders(now = new Date()) {
-  if (!RESEND_API_KEY) {
-    console.warn("RESEND_API_KEY is not set — skipping email check.");
-    return 0;
-  }
+  if (!RESEND_API_KEY && !smtp) return 0;
 
   let sent = 0;
   for (const user of allUsers()) {
@@ -151,6 +181,58 @@ async function checkReminders(now = new Date()) {
   return sent;
 }
 
+/* ---------- full app state, pushed by the desktop app ---------- */
+
+/** Only the desktop app (which knows SYNC_TOKEN) may read or write your tasks. */
+function requireToken(req, res, next) {
+  if (!SYNC_TOKEN || req.get("authorization") !== `Bearer ${SYNC_TOKEN}`) {
+    return res.status(401).json({ ok: false, error: "Unauthorized." });
+  }
+  next();
+}
+
+app.get("/api/state", requireToken, (_req, res) => res.json(getState()));
+
+app.put("/api/state", requireToken, (req, res) => {
+  const { tasks, settings, updatedAt } = req.body ?? {};
+  if (!Array.isArray(tasks) || tasks.length > 5000) return res.status(400).json({ error: "Bad task list." });
+  if (Number(updatedAt) < Number(getState().updatedAt || 0)) return res.status(409).json({ ok: false, stale: true });
+  putState({ tasks, settings: settings ?? null, updatedAt: Number(updatedAt) || Date.now() });
+  res.json({ ok: true });
+});
+
+/* ---------- morning briefing ---------- */
+
+/** Once per day at/after the chosen time, up to 3 hours late (e.g. after a restart). */
+async function checkDigest(now = new Date()) {
+  const { tasks, settings } = getState();
+  if (!settings || settings.morningEmail === false || !tasks?.length) return;
+  // The server runs in UTC; use YOUR timezone (sent by the desktop app).
+  if (settings.tz && process.env.TZ !== settings.tz) {
+    process.env.TZ = settings.tz;
+    now = new Date();
+  }
+  const to = settings.email || DEFAULT_EMAIL;
+  if (!EMAIL_RE.test(to ?? "")) return;
+
+  const [h, m] = String(settings.digestTime || "07:00").split(":").map(Number);
+  const at = new Date(now);
+  at.setHours(h || 0, m || 0, 0, 0);
+  const meta = getMeta();
+  if (meta.lastDigest === dayKey(now)) return;
+  if (now < at || now - at > 3 * 60 * 60 * 1000) return;
+
+  const { subject, html, text } = buildDigest(tasks, settings, now, "");
+  const r = await sendMail({ to, subject, html, text });
+  if (r.ok) {
+    putMeta({ ...meta, lastDigest: dayKey(now) });
+    console.log(`Sent the morning briefing to ${to}.`);
+  } else {
+    console.error("Morning briefing failed:", r.error);
+  }
+}
+
+
 /* On-demand check — the target for cron-job.org / UptimeRobot pings. */
 app.get("/api/check-reminders", async (_req, res) => {
   try {
@@ -164,6 +246,7 @@ app.get("/api/check-reminders", async (_req, res) => {
 
 /* Automatic check every 5 minutes while the process is awake. */
 cron.schedule("*/5 * * * *", () => checkReminders().catch(console.error));
+cron.schedule("* * * * *", () => checkDigest().catch(console.error));
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Calm Priorities reminder server on :${PORT}`));

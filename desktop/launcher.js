@@ -51,6 +51,10 @@ const DEFAULT_CONFIG = {
   smtpPass: "",
   smtpHost: "smtp.gmail.com",
   smtpPort: 465,
+  // Optional cloud copy (see README): lets the cloud server send the morning
+  // email while this PC is off. Leave empty to send from this PC instead.
+  cloudUrl: "",
+  cloudToken: "",
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -176,6 +180,28 @@ setInterval(() => checkReminders().catch(console.error), 5 * 60 * 1000); // then
 /* ---------- app state (tasks + settings), saved on this PC ---------- */
 const readState = () => readJson(STATE_FILE, { tasks: [], settings: null, updatedAt: 0 });
 
+/* ---------- cloud copy (optional) ---------- */
+const cloudOn = () => Boolean(config.cloudUrl && config.cloudToken);
+
+/** Best-effort push of the saved state to the cloud server; failures are harmless. */
+async function pushToCloud() {
+  if (!cloudOn()) return;
+  const state = readState();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  try {
+    const r = await fetch(`${config.cloudUrl.replace(/\/$/, "")}/api/state`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.cloudToken}` },
+      body: JSON.stringify({ ...state, settings: state.settings ? { ...state.settings, tz } : null }),
+      signal: AbortSignal.timeout(60_000), // a sleeping free server can take ~30s to wake
+    });
+    if (!r.ok && r.status !== 409) console.error("Cloud sync failed:", r.status);
+  } catch (err) {
+    console.error("Cloud sync failed:", String(err?.message || err));
+  }
+}
+setTimeout(() => pushToCloud(), 6000); // on launch, so the cloud has your latest
+
 /* ---------- morning briefing ---------- */
 const appUrl = () => `http://localhost:${config.port}`;
 
@@ -186,6 +212,7 @@ async function sendDigest(tasks, settings, to) {
 
 /** Due once per day: at/after the chosen time, up to 8 hours late (PC was off or asleep). */
 async function checkDigest(now = new Date()) {
+  if (cloudOn()) return; // the cloud server sends it (even when this PC is off)
   const state = readState();
   const settings = state.settings;
   if (!settings || settings.morningEmail === false) return;
@@ -276,6 +303,7 @@ async function handlePutState(req) {
     settings: settings ?? stored.settings,
     updatedAt: Number(updatedAt) || Date.now(),
   });
+  pushToCloud(); // fire and forget
   return json({ ok: true });
 }
 
