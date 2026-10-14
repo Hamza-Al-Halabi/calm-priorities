@@ -10,13 +10,18 @@ import { DEADLINE_BADGES } from "../lib/tones.js";
 
 const STATE_LABEL = { overdue: "Overdue", soon: "Due soon", later: "", done: "" };
 
-export default function TaskCard({ task, now, onToggle, onEdit, onDelete }) {
+export default function TaskCard({ task, now, todayKey, onToggle, onTogglePlan, onEdit, onDelete }) {
   const [confirming, setConfirming] = useState(false);
   const state = deadlineState(task, now);
 
   return (
     <li
-      className={`group rounded-2xl border border-linen-200 bg-white p-4 shadow-soft transition ${
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", task.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      className={`group cursor-grab rounded-2xl border border-linen-200 bg-white p-4 shadow-soft transition ${
         task.done ? "opacity-60" : "hover:shadow-lift"
       }`}
     >
@@ -87,10 +92,23 @@ export default function TaskCard({ task, now, onToggle, onEdit, onDelete }) {
           <>
             <button
               onClick={() => onToggle(task.id)}
-              className="mr-auto rounded-full px-3 py-1.5 text-xs font-bold text-sage-700 hover:bg-sage-50"
+              className="rounded-full px-3 py-1.5 text-xs font-bold text-sage-700 hover:bg-sage-50"
             >
               {task.done ? "Mark as to do" : "Mark done"}
             </button>
+            {!task.done && (
+              <button
+                onClick={() => onTogglePlan(task.id)}
+                className={`mr-auto rounded-full px-3 py-1.5 text-xs font-bold ${
+                  task.plannedFor === todayKey
+                    ? "bg-lav-100 text-lav-700"
+                    : "text-lav-700 hover:bg-lav-50"
+                }`}
+              >
+                {task.plannedFor === todayKey ? "✓ In today" : "+ Today"}
+              </button>
+            )}
+            {task.done && <span className="mr-auto" />}
             <button
               onClick={() => onEdit(task)}
               className="rounded-full px-3 py-1.5 text-xs font-bold text-ink-600 hover:bg-linen-100"

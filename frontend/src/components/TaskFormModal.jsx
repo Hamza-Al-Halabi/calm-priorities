@@ -7,16 +7,18 @@ import { useEffect, useState } from "react";
 import Modal from "./Modal.jsx";
 import { PRIORITIES, TONES } from "../lib/tones.js";
 import { toInputValue } from "../lib/deadlines.js";
+import { dayKey } from "../lib/stats.js";
 
 const inputClass =
   "w-full rounded-xl border border-linen-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 placeholder:text-ink-400 focus:border-lav-500";
 
-export default function TaskFormModal({ open, initial, defaultPriority, onClose, onSave }) {
+export default function TaskFormModal({ open, initial, defaultPriority, defaultPlanToday = false, onClose, onSave }) {
   const editing = Boolean(initial);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [deadline, setDeadline] = useState(""); // datetime-local string
   const [priority, setPriority] = useState("medium");
+  const [planToday, setPlanToday] = useState(false);
 
   // Refill the form each time the modal opens.
   useEffect(() => {
@@ -25,12 +27,17 @@ export default function TaskFormModal({ open, initial, defaultPriority, onClose,
     setDescription(initial?.description ?? "");
     setDeadline(initial?.deadline ? toInputValue(initial.deadline) : "");
     setPriority(initial?.priority ?? defaultPriority ?? "medium");
-  }, [open, initial, defaultPriority]);
+    setPlanToday(initial ? initial.plannedFor === dayKey(new Date()) : defaultPlanToday);
+  }, [open, initial, defaultPriority, defaultPlanToday]);
 
   function handleSave() {
     if (!title.trim()) return;
+    const today = dayKey(new Date());
+    const wasToday = initial?.plannedFor === today;
     onSave(
       {
+        // untouched checkbox keeps whatever day was planned before
+        plannedFor: planToday === wasToday ? (initial?.plannedFor ?? null) : planToday ? today : null,
         title: title.trim(),
         description: description.trim(),
         deadline: deadline ? new Date(deadline).toISOString() : null,
@@ -110,6 +117,16 @@ export default function TaskFormModal({ open, initial, defaultPriority, onClose,
             ))}
           </div>
         </div>
+
+        <label className="flex cursor-pointer items-center gap-2.5 text-sm font-semibold text-ink-900">
+          <input
+            type="checkbox"
+            checked={planToday}
+            onChange={(e) => setPlanToday(e.target.checked)}
+            className="size-4 accent-lav-600"
+          />
+          Add to today's plan
+        </label>
 
         <div className="flex justify-end gap-2 pt-1">
           <button

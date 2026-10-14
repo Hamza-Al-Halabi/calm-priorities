@@ -4,7 +4,10 @@
   "version": "1.0.0",
   "scripts": {
     "start": "bun launcher.js",
-    "build:frontend": "cd ../frontend && vite build --config vite.config.desktop.js",
+    "build:frontend": "cd ../frontend && npx vite build --mode desktop --config vite.config.desktop.js",
     "build:exe": "bun build --compile --target=bun-windows-x64 launcher.js --outfile CalmPriorities.exe"
+  },
+  "dependencies": {
+    "nodemailer": "^10.1.1"
   }
 }

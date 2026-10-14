@@ -4,17 +4,43 @@
    they read clearly. Each column has its own quiet "+ Add" button.
    ------------------------------------------------------------------ */
 
+import { useState } from "react";
 import TaskCard from "./TaskCard.jsx";
 import { PlusIcon } from "./Header.jsx";
 import { TONES } from "../lib/tones.js";
 import { sortTasks } from "../lib/deadlines.js";
 
-export default function PriorityColumn({ priority, tasks, now, onAdd, onEdit, onDelete, onToggle }) {
+export default function PriorityColumn({
+  priority,
+  tasks,
+  now,
+  todayKey,
+  onAdd,
+  onEdit,
+  onDelete,
+  onToggle,
+  onTogglePlan,
+  onMove,
+}) {
   const tone = TONES[priority];
+  const [over, setOver] = useState(false);
   const open = tasks.filter((t) => !t.done).length;
 
   return (
-    <section className={`flex flex-col rounded-3xl border p-4 sm:p-5 ${tone.column}`}>
+    <section
+      className={`flex flex-col rounded-3xl border p-4 transition sm:p-5 ${tone.column} ${over ? "drop-target" : ""}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget) && setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const id = e.dataTransfer.getData("text/plain");
+        if (id) onMove(id, priority);
+      }}
+    >
       <header className="flex items-center gap-2.5">
         <span className={`size-2.5 rounded-full ${tone.dot}`} aria-hidden="true" />
         <h2 className="text-sm font-bold text-ink-900">{tone.label}</h2>
@@ -42,6 +68,8 @@ export default function PriorityColumn({ priority, tasks, now, onAdd, onEdit, on
               key={task.id}
               task={task}
               now={now}
+              todayKey={todayKey}
+              onTogglePlan={onTogglePlan}
               onToggle={onToggle}
               onEdit={onEdit}
               onDelete={onDelete}

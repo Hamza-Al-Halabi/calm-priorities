@@ -3,24 +3,41 @@ CALM PRIORITIES — WINDOWS
 
 RUN IT
 1. Keep CalmPriorities.exe and config.json in the same folder.
-2. Double-click CalmPriorities.exe.
-   First time, Windows SmartScreen may warn (the exe isn't code-signed):
-   click "More info" -> "Run anyway".
-3. Your browser opens at http://localhost:5173 — that's the app.
+2. Double-click CalmPriorities.exe. Your browser opens the app.
+   (First time, SmartScreen may warn: "More info" -> "Run anyway".)
 
-ALREADY SET UP FOR YOU (config.json)
-- Your Resend API key and email are pre-filled. On first launch the app
-  auto-fills h.halab9.6.3@gmail.com and turns email reminders on.
-- Edit config.json anytime (port, key, email). Restart the exe after.
+EVERY DAY
+- Today:  your plan for the day + suggestions (overdue, carried over, urgent).
+- Week:   bars per day, weekly goal, wins, what's still open. Use the arrows
+          to look at earlier weeks.
+- Board:  the three priority boxes. Drag a card to change its priority.
+
+YOUR DATA
+- Saved in state.json next to the exe (backup: state.backup.json).
+  Clearing your browser no longer loses anything. Back up that folder
+  if you want extra safety.
+
+MORNING EMAIL AT 7:00 (one-time setup, ~3 minutes)
+Sending needs a mail account. Easiest: Gmail with an "App password".
+1. Google Account -> Security -> turn on 2-Step Verification.
+2. Search "App passwords" in your Google Account, create one (name it
+   "Calm Priorities"), copy the 16 letters.
+3. Open config.json and fill in:
+      "smtpUser": "hamzaalhalabi99@gmail.com",
+      "smtpPass": "the 16 letters"
+   (defaultEmail is already hamzaalhalabi99@gmail.com)
+4. Restart the exe. In the app: Settings -> "Send a test now".
+Time and on/off live in Settings -> Morning briefing.
+
+IMPORTANT: the exe must be running at 7:00. If the PC is off, the email
+goes out as soon as the app starts (up to 8 hours after the set time).
+To start it automatically when you log in, double-click
+Start-With-Windows.bat once. For a 7:00 email even with the PC off, the
+reminder server must run in the cloud (see README, section 5).
 
 GOOD TO KNOW
-- Email reminders send while the exe window is open — minimize it,
-  don't close it. Checks run every 5 minutes.
-- Resend's test sender (onboarding@resend.dev) only delivers to the
-  email you signed up to Resend with. To email any address, verify a
-  domain at resend.com -> Domains, then set "fromEmail" in config.json.
-- Browser notifications: in the app, Reminders -> Turn on browser
-  reminders -> Allow.
-- Your tasks live in your browser (localStorage). data.json next to the
-  exe only mirrors upcoming deadlines for the email check.
-- Port 5173 busy? Change "port" in config.json (e.g. 5180) and restart.
+- Keep the window open (minimized is fine).
+- Port 5173 busy? Change "port" in config.json and restart.
+- config.json holds your password: don't share that file.
+- Resend (resendApiKey) still works as an alternative, but its test
+  sender only delivers to the address you signed up to Resend with.

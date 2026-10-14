@@ -3,3 +3,9 @@ dist/
 .env
 data.json
 .DS_Store
+state.json
+state.backup.json
+meta.json
+*.tmp
+desktop/config.json
+frontend/dist/

@@ -1,21 +1,34 @@
 /* ------------------------------------------------------------------
    App.jsx — the single source of truth.
 
-   · tasks/settings live in React state, persisted through lib/storage
-     (localStorage today, database-ready later).
+   · tasks/settings live in React state and are saved two ways:
+     localStorage (instant) and, in the desktop app, state.json on your
+     PC (lib/storage). The copy with the newer stamp wins on startup.
+   · views: Today (daily plan) · Week (progress dashboard) · Board
    · a 30s loop fires browser reminders (lib/notifications).
-   · a debounced effect syncs tasks to the email reminder server
-     (lib/sync) whenever something changes.
+   · a debounced effect keeps the reminder server in step (lib/sync).
    ------------------------------------------------------------------ */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Header from "./components/Header.jsx";
-import CheckInCard from "./components/CheckInCard.jsx";
-import UpNext from "./components/UpNext.jsx";
-import PriorityColumn from "./components/PriorityColumn.jsx";
+import TodayView from "./components/TodayView.jsx";
+import WeekView from "./components/WeekView.jsx";
+import BoardView from "./components/BoardView.jsx";
+import Confetti from "./components/Confetti.jsx";
 import TaskFormModal from "./components/TaskFormModal.jsx";
-import RemindersModal from "./components/RemindersModal.jsx";
-import { loadTasks, saveTasks, loadSettings, saveSettings } from "./lib/storage.js";
+import SettingsModal from "./components/SettingsModal.jsx";
+import {
+  loadTasks,
+  saveTasks,
+  loadSettings,
+  saveSettings,
+  loadStamp,
+  saveStamp,
+  defaultSettings,
+  serverStorage,
+  pullServerState,
+  pushServerState,
+} from "./lib/storage.js";
 import {
   notificationsSupported,
   dueForBrowserReminder,
@@ -23,18 +36,85 @@ import {
 } from "./lib/notifications.js";
 import { syncToServer, serverConfigured, apiBase } from "./lib/sync.js";
 import { isNativeApp, ensureNativePermission, rescheduleAll } from "./lib/mobileNotifications.js";
-import { PRIORITIES } from "./lib/tones.js";
+import { dayKey, todayPlan } from "./lib/stats.js";
+
+const VIEW_KEY = "calm-priorities:view";
+const loadView = () => {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return v === "week" || v === "board" ? v : "today";
+  } catch {
+    return "today";
+  }
+};
 
 export default function App() {
   const [tasks, setTasks] = useState(loadTasks);
   const [settings, setSettings] = useState(loadSettings);
   const [now, setNow] = useState(() => new Date());
-  const [form, setForm] = useState({ open: false, task: null, defaultPriority: "medium" });
-  const [remindersOpen, setRemindersOpen] = useState(false);
+  const [view, setView] = useState(loadView);
+  const [form, setForm] = useState({ open: false, task: null, defaultPriority: "medium", plan: false });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [ready, setReady] = useState(!serverStorage); // PC copy checked?
+  const [burst, setBurst] = useState(0);
+
+  /* Which copy of the data is newer: bumped on every user change. */
+  const stampRef = useRef(loadStamp());
+  const touch = () => {
+    stampRef.current = Date.now();
+  };
+  const updateTasks = (fn) => {
+    touch();
+    setTasks(fn);
+  };
+  const updateSettings = (next) => {
+    touch();
+    setSettings(next);
+  };
+
+  const changeView = (v) => {
+    setView(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* ignore */
+    }
+  };
 
   /* ---------- persistence ---------- */
-  useEffect(() => saveTasks(tasks), [tasks]);
-  useEffect(() => saveSettings(settings), [settings]);
+  useEffect(() => {
+    saveTasks(tasks);
+    saveStamp(stampRef.current);
+  }, [tasks]);
+  useEffect(() => {
+    saveSettings(settings);
+    saveStamp(stampRef.current);
+  }, [settings]);
+
+  /* Desktop app: adopt the PC copy if it's newer than this browser's. */
+  useEffect(() => {
+    if (!serverStorage) return;
+    let cancelled = false;
+    pullServerState().then((s) => {
+      if (cancelled) return;
+      if (s && s.updatedAt > stampRef.current) {
+        stampRef.current = s.updatedAt;
+        setTasks(s.tasks);
+        if (s.settings) setSettings({ ...defaultSettings, ...s.settings });
+      }
+      setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* …and keep the PC copy current (debounced). The server ignores stale stamps. */
+  useEffect(() => {
+    if (!ready || !serverStorage) return;
+    const id = setTimeout(() => pushServerState(tasks, settings, stampRef.current), 800);
+    return () => clearTimeout(id);
+  }, [tasks, settings, ready]);
 
   /* ---------- keep deadline badges fresh (re-render each minute) ---------- */
   useEffect(() => {
@@ -72,8 +152,7 @@ export default function App() {
       .catch(() => {}); // web deploys just 404 here — harmless
   }, []);
 
-  /* ---------- Android app: ask notification permission once, then keep
-     device notifications in sync with tasks (fires even when app is closed) ---------- */
+  /* ---------- Android app: device notifications, even when closed ---------- */
   useEffect(() => {
     if (isNativeApp) ensureNativePermission();
   }, []);
@@ -90,27 +169,33 @@ export default function App() {
     return () => clearTimeout(id);
   }, [tasks, settings]);
 
+  /* ---------- confetti when today's plan becomes fully done ---------- */
+  const plan = todayPlan(tasks, now);
+  const allDone = plan.total > 0 && plan.done === plan.total;
+  const wasAllDone = useRef(allDone);
+  useEffect(() => {
+    if (allDone && !wasAllDone.current) setBurst((b) => b + 1);
+    wasAllDone.current = allDone;
+  }, [allDone]);
+
   /* ---------- task actions ---------- */
+  const patch = (id, fn) => updateTasks((ts) => ts.map((t) => (t.id === id ? fn(t) : t)));
+
   function upsertTask(data, existingId) {
     if (existingId) {
-      setTasks((ts) =>
-        ts.map((t) =>
-          t.id === existingId
-            ? {
-                ...t,
-                ...data,
-                // if the deadline moved, allow a fresh browser reminder
-                notified: data.deadline !== t.deadline ? false : t.notified,
-              }
-            : t
-        )
-      );
+      patch(existingId, (t) => ({
+        ...t,
+        ...data,
+        // if the deadline moved, allow a fresh browser reminder
+        notified: data.deadline !== t.deadline ? false : t.notified,
+      }));
     } else {
-      setTasks((ts) => [
+      updateTasks((ts) => [
         ...ts,
         {
           id: crypto.randomUUID(),
           done: false,
+          completedAt: null,
           notified: false,
           createdAt: new Date().toISOString(),
           ...data,
@@ -119,76 +204,108 @@ export default function App() {
     }
   }
 
-  const toggleDone = (id) => setTasks((ts) => ts.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
-  const deleteTask = (id) => setTasks((ts) => ts.filter((t) => t.id !== id));
-  const openAdd = (priority = "medium") => setForm({ open: true, task: null, defaultPriority: priority });
-  const openEdit = (task) => setForm({ open: true, task, defaultPriority: task.priority });
+  const toggleDone = (id) =>
+    patch(id, (t) => ({
+      ...t,
+      done: !t.done,
+      completedAt: t.done ? null : new Date().toISOString(),
+    }));
+  const deleteTask = (id) => updateTasks((ts) => ts.filter((t) => t.id !== id));
+  const movePriority = (id, priority) => patch(id, (t) => ({ ...t, priority }));
 
-  /* ---------- derived values ---------- */
-  const doneCount = tasks.filter((t) => t.done).length;
+  const today = () => dayKey(new Date());
+  const planTask = (id) => patch(id, (t) => ({ ...t, plannedFor: today() }));
+  const unplanTask = (id) => patch(id, (t) => ({ ...t, plannedFor: null }));
+  const togglePlan = (id) =>
+    patch(id, (t) => ({ ...t, plannedFor: t.plannedFor === today() ? null : today() }));
+  const planMany = (ids) => {
+    const set = new Set(ids);
+    updateTasks((ts) => ts.map((t) => (set.has(t.id) ? { ...t, plannedFor: today() } : t)));
+  };
+  const quickAdd = (title, priority) =>
+    upsertTask({ title, description: "", deadline: null, priority, plannedFor: today() });
 
-  const byPriority = useMemo(() => {
-    const groups = { high: [], medium: [], low: [] };
-    for (const t of tasks) (groups[t.priority] ?? groups.medium).push(t);
-    return groups;
-  }, [tasks]);
-
-  const upcoming = useMemo(
-    () =>
-      tasks
-        .filter((t) => t.deadline && !t.done)
-        .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
-        .slice(0, 4),
-    [tasks]
-  );
+  const openAdd = (priority = "medium", plan = false) =>
+    setForm({ open: true, task: null, defaultPriority: priority, plan });
+  const openEdit = (task) =>
+    setForm({ open: true, task, defaultPriority: task.priority, plan: false });
 
   /* ---------- layout ---------- */
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
       <Header
-        onAddTask={() => openAdd("medium")}
-        onOpenReminders={() => setRemindersOpen(true)}
-        remindersOn={settings.browserReminders || settings.emailReminders}
+        view={view}
+        onView={changeView}
+        onAddTask={() => openAdd("medium", view === "today")}
+        onOpenSettings={() => setSettingsOpen(true)}
+        remindersOn={settings.browserReminders || settings.emailReminders || settings.morningEmail}
       />
 
-      <div className="mt-8 grid gap-4 md:grid-cols-[1.4fr_1fr]">
-        <CheckInCard done={doneCount} total={tasks.length} />
-        <UpNext tasks={upcoming} now={now} />
-      </div>
+      {view === "today" && (
+        <TodayView
+          tasks={tasks}
+          settings={settings}
+          now={now}
+          onToggle={toggleDone}
+          onEdit={openEdit}
+          onUnplan={unplanTask}
+          onPlan={planTask}
+          onPlanMany={planMany}
+          onQuickAdd={quickAdd}
+          onOpenWeek={() => changeView("week")}
+        />
+      )}
 
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-3">
-        {PRIORITIES.map((p) => (
-          <PriorityColumn
-            key={p}
-            priority={p}
-            tasks={byPriority[p]}
-            now={now}
-            onAdd={openAdd}
-            onEdit={openEdit}
-            onDelete={deleteTask}
-            onToggle={toggleDone}
-          />
-        ))}
-      </div>
+      {view === "week" && (
+        <WeekView
+          tasks={tasks}
+          settings={settings}
+          now={now}
+          onSetGoal={(n) => updateSettings({ ...settings, weeklyGoal: n })}
+          onPlan={planTask}
+          onEdit={openEdit}
+        />
+      )}
+
+      {view === "board" && (
+        <BoardView
+          tasks={tasks}
+          now={now}
+          todayKey={dayKey(now)}
+          handlers={{
+            onAdd: openAdd,
+            onEdit: openEdit,
+            onDelete: deleteTask,
+            onToggle: toggleDone,
+            onTogglePlan: togglePlan,
+            onMove: movePriority,
+          }}
+        />
+      )}
 
       <footer className="mt-10 text-center text-xs text-ink-400">
-        Your tasks stay on this device — unless you turn on email reminders, nothing leaves your
-        browser.
+        {serverStorage
+          ? "Your tasks are saved on this PC."
+          : "Your tasks stay on this device — unless you turn on email reminders, nothing leaves your browser."}
       </footer>
+
+      <Confetti burst={burst} />
 
       <TaskFormModal
         open={form.open}
         initial={form.task}
         defaultPriority={form.defaultPriority}
+        defaultPlanToday={form.plan}
         onClose={() => setForm((f) => ({ ...f, open: false }))}
         onSave={upsertTask}
       />
 
-      <RemindersModal
-        open={remindersOpen}
+      <SettingsModal
+        open={settingsOpen}
         settings={settings}
-        onClose={() => setRemindersOpen(false)}
-        onSave={setSettings}
+        tasks={tasks}
+        onClose={() => setSettingsOpen(false)}
+        onSave={updateSettings}
       />
     </div>
   );
